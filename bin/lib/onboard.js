@@ -3115,23 +3115,50 @@ async function _setupPolicies(sandboxName) {
     }
 
     if (answer.toLowerCase() === "list") {
-      // Let user pick
-      const picks = await prompt("  Enter preset names (comma-separated): ");
-      const selected = picks
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      for (const name of selected) {
-        try {
-          policies.applyPreset(sandboxName, name);
-        } catch (err) {
-          const message = err && err.message ? err.message : String(err);
-          if (message.includes("Unimplemented")) {
-            console.error("  OpenShell policy updates are not supported by this gateway build.");
-            console.error("  This is a known issue tracked in NemoClaw #536.");
-          }
-          throw err;
+      // Let user pick with retry loop
+      const MAX_RETRIES = 5;
+      const knownPresets = new Set(allPresets.map((p) => p.name));
+      let attempts = 0;
+      let selected = [];
+
+      while (attempts < MAX_RETRIES) {
+        const picks = await prompt("  Enter preset names (comma-separated): ");
+        selected = picks.split(",").map((s) => s.trim()).filter(Boolean);
+
+        if (selected.length === 0) {
+          console.log("  No presets selected. Skipping policy presets.");
+          return;
         }
+
+        const failedPresets = selected.filter((name) => !knownPresets.has(name));
+
+        if (failedPresets.length === 0) {
+          for (const name of selected) {
+            try {
+              policies.applyPreset(sandboxName, name);
+            } catch (err) {
+              const message = err && err.message ? err.message : String(err);
+              if (message.includes("Unimplemented")) {
+                console.error("  OpenShell policy updates are not supported by this gateway build.");
+                console.error("  This is a known issue tracked in NemoClaw #536.");
+              }
+              throw err;
+            }
+          }
+          break;  // All presets applied successfully
+        }
+
+        attempts++;
+        console.error(`  Invalid preset(s): ${failedPresets.join(", ")}`);
+        if (attempts < MAX_RETRIES) {
+          console.log(`  Please try again. (${MAX_RETRIES - attempts} attempts remaining)`);
+          console.log("");
+        }
+      }
+
+      if (attempts >= MAX_RETRIES) {
+        console.log("  Max retries reached. Skipping policy presets.");
+        return;
       }
     } else {
       // Apply suggested
@@ -3271,15 +3298,38 @@ async function setupPoliciesWithSelection(sandboxName, options = {}) {
 
   let interactiveChoice = suggestions;
   if (answer.toLowerCase() === "list") {
-    const custom = await prompt("  Enter preset names (comma-separated): ");
-    interactiveChoice = parsePolicyPresetEnv(custom);
-  }
+    const MAX_RETRIES = 5;
+    const knownPresets = new Set(allPresets.map((p) => p.name));
+    let attempts = 0;
 
-  const knownPresets = new Set(allPresets.map((p) => p.name));
-  const invalidPresets = interactiveChoice.filter((name) => !knownPresets.has(name));
-  if (invalidPresets.length > 0) {
-    console.error(`  Unknown policy preset(s): ${invalidPresets.join(", ")}`);
-    process.exit(1);
+    while (attempts < MAX_RETRIES) {
+      const picks = await prompt("  Enter preset names (comma-separated): ");
+      const selected = picks.split(",").map((s) => s.trim()).filter(Boolean);
+
+      if (selected.length === 0) {
+        console.log("  No presets selected. Skipping policy presets.");
+        return [];
+      }
+
+      const failedPresets = selected.filter((name) => !knownPresets.has(name));
+
+      if (failedPresets.length === 0) {
+        interactiveChoice = selected;
+        break;
+      }
+
+      attempts += 1;
+      console.error(`  Invalid preset(s): ${failedPresets.join(", ")}`);
+      if (attempts < MAX_RETRIES) {
+        console.log(`  Please try again. (${MAX_RETRIES - attempts} attempts remaining)`);
+        console.log("");
+      }
+    }
+
+    if (attempts >= MAX_RETRIES) {
+      console.log("  Max retries reached. Skipping policy presets.");
+      return [];
+    }
   }
 
   if (onSelection) onSelection(interactiveChoice);
