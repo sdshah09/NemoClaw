@@ -3339,7 +3339,16 @@ async function setupPoliciesWithSelection(sandboxName, options = {}) {
   }
 
   for (const name of interactiveChoice) {
-    policies.applyPreset(sandboxName, name);
+    try {
+      policies.applyPreset(sandboxName, name);
+    } catch (err) {
+      const message = err && err.message ? err.message : String(err);
+      if (message.includes("Unimplemented")) {
+        console.error("  OpenShell policy updates are not supported by this gateway build.");
+        console.error("  This is a known issue tracked in NemoClaw #536.");
+      }
+      throw err;
+    }
   }
   return interactiveChoice;
 }
