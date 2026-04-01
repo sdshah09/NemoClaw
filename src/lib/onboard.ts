@@ -3866,23 +3866,50 @@ async function _setupPolicies(sandboxName, options = {}) {
     }
 
     if (answer.toLowerCase() === "list") {
-      // Let user pick
-      const picks = await prompt("  Enter preset names (comma-separated): ");
-      const selected = picks
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      for (const name of selected) {
-        try {
-          policies.applyPreset(sandboxName, name);
-        } catch (err) {
-          const message = err && err.message ? err.message : String(err);
-          if (message.includes("Unimplemented")) {
-            console.error("  OpenShell policy updates are not supported by this gateway build.");
-            console.error("  This is a known issue tracked in NemoClaw #536.");
-          }
-          throw err;
+      // Let user pick with retry loop
+      const MAX_RETRIES = 5;
+      const knownPresets = new Set(allPresets.map((p) => p.name));
+      let attempts = 0;
+      let selected = [];
+
+      while (attempts < MAX_RETRIES) {
+        const picks = await prompt("  Enter preset names (comma-separated): ");
+        selected = picks.split(",").map((s) => s.trim()).filter(Boolean);
+
+        if (selected.length === 0) {
+          console.log("  No presets selected. Skipping policy presets.");
+          return;
         }
+
+        const failedPresets = selected.filter((name) => !knownPresets.has(name));
+
+        if (failedPresets.length === 0) {
+          for (const name of selected) {
+            try {
+              policies.applyPreset(sandboxName, name);
+            } catch (err) {
+              const message = err && err.message ? err.message : String(err);
+              if (message.includes("Unimplemented")) {
+                console.error("  OpenShell policy updates are not supported by this gateway build.");
+                console.error("  This is a known issue tracked in NemoClaw #536.");
+              }
+              throw err;
+            }
+          }
+          break;  // All presets applied successfully
+        }
+
+        attempts++;
+        console.error(`  Invalid preset(s): ${failedPresets.join(", ")}`);
+        if (attempts < MAX_RETRIES) {
+          console.log(`  Please try again. (${MAX_RETRIES - attempts} attempts remaining)`);
+          console.log("");
+        }
+      }
+
+      if (attempts >= MAX_RETRIES) {
+        console.log("  Max retries reached. Skipping policy presets.");
+        return;
       }
     } else {
       // Apply suggested
@@ -4123,14 +4150,59 @@ async function setupPoliciesWithSelection(sandboxName, options = {}) {
     return chosen;
   }
 
-  // Interactive: raw-mode TUI checkbox selector
-  // Seed selection with already-applied presets and credential-based suggestions
-  const knownNames = new Set(allPresets.map((p) => p.name));
-  const initialSelected = [
-    ...applied.filter((name) => knownNames.has(name)),
-    ...suggestions.filter((name) => knownNames.has(name) && !applied.includes(name)),
-  ];
-  const interactiveChoice = await presetsCheckboxSelector(allPresets, initialSelected);
+  console.log("");
+  console.log("  Available policy presets:");
+  allPresets.forEach((p) => {
+    const marker = applied.includes(p.name) ? "●" : "○";
+    const suggested = suggestions.includes(p.name) ? " (suggested)" : "";
+    console.log(`    ${marker} ${p.name} — ${p.description}${suggested}`);
+  });
+  console.log("");
+
+  const answer = await prompt(
+    `  Apply suggested presets (${suggestions.join(", ")})? [Y/n/list]: `,
+  );
+
+  if (answer.toLowerCase() === "n") {
+    console.log("  Skipping policy presets.");
+    return [];
+  }
+
+  let interactiveChoice = suggestions;
+  if (answer.toLowerCase() === "list") {
+    const MAX_RETRIES = 5;
+    const knownPresets = new Set(allPresets.map((p) => p.name));
+    let attempts = 0;
+
+    while (attempts < MAX_RETRIES) {
+      const picks = await prompt("  Enter preset names (comma-separated): ");
+      const selected = picks.split(",").map((s) => s.trim()).filter(Boolean);
+
+      if (selected.length === 0) {
+        console.log("  No presets selected. Skipping policy presets.");
+        return [];
+      }
+
+      const failedPresets = selected.filter((name) => !knownPresets.has(name));
+
+      if (failedPresets.length === 0) {
+        interactiveChoice = selected;
+        break;
+      }
+
+      attempts += 1;
+      console.error(`  Invalid preset(s): ${failedPresets.join(", ")}`);
+      if (attempts < MAX_RETRIES) {
+        console.log(`  Please try again. (${MAX_RETRIES - attempts} attempts remaining)`);
+        console.log("");
+      }
+    }
+
+    if (attempts >= MAX_RETRIES) {
+      console.log("  Max retries reached. Skipping policy presets.");
+      return [];
+    }
+  }
 
   if (onSelection) onSelection(interactiveChoice);
   if (!waitForSandboxReady(sandboxName)) {
