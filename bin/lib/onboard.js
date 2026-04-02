@@ -3135,7 +3135,10 @@ async function _setupPolicies(sandboxName) {
         if (failedPresets.length === 0) {
           for (const name of selected) {
             try {
-              policies.applyPreset(sandboxName, name);
+              const appliedPreset = policies.applyPreset(sandboxName, name);
+              if (appliedPreset === false) {
+                throw new Error(`Failed to apply policy preset '${name}'.`);
+              }
             } catch (err) {
               const message = err && err.message ? err.message : String(err);
               if (message.includes("Unimplemented")) {
@@ -3164,7 +3167,10 @@ async function _setupPolicies(sandboxName) {
       // Apply suggested
       for (const name of suggestions) {
         try {
-          policies.applyPreset(sandboxName, name);
+          const appliedPreset = policies.applyPreset(sandboxName, name);
+          if (appliedPreset === false) {
+            throw new Error(`Failed to apply policy preset '${name}'.`);
+          }
         } catch (err) {
           const message = err && err.message ? err.message : String(err);
           if (message.includes("Unimplemented")) {
